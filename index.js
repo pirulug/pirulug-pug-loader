@@ -32,7 +32,6 @@ module.exports = function (source) {
   var filePaths = {};
 
   var missingFileMode = false;
-
   function getFileContent(context, request) {
     request = loaderUtils.urlToRequest(request, query.root);
     var baseRequest = request;
@@ -55,7 +54,6 @@ module.exports = function (source) {
 
       request = _request;
       next();
-
       function next() {
         loadModule(
           "-!" + path.join(__dirname, "stringify.loader.js") + "!" + request,
@@ -154,7 +152,6 @@ module.exports = function (source) {
     : {};
 
   run();
-
   function run() {
     try {
       var tmplFunc = pug.compileClient(source, {
