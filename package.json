@@ -1,6 +1,6 @@
 {
   "name": "pirulug-pug-loader",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "Pug Loader",
   "main": "index.js",
   "scripts": {
@@ -14,5 +14,12 @@
   "devDependencies": {
     "pug": "^3.0.3",
     "pug-walk": "^2.0.0"
+  },
+  "dependencies": {
+    "pug": "^3.0.3",
+    "pug-walk": "^2.0.0"
+  },
+  "peerDependencies": {
+    "pug": "^3.0.3"
   }
 }
