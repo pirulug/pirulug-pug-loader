@@ -1,7 +1,7 @@
 # pirulug-pug-loader
 
 ```bash
-npm i pirulug-prettify-webpack-plugin
+npm i pirulug-pug-loader
 ```
 
 
