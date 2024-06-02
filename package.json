@@ -1,5 +1,5 @@
 {
-  "name": "pirulug-pug-loader",
+  "name": "@pirulug/pug-loader",
   "version": "0.0.4",
   "description": "Pug Loader",
   "main": "index.js",
