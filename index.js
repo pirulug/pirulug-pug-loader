@@ -1,25 +1,85 @@
-const path = require("path");
-const nodeResolve = require("resolve").sync;
-const walk = require("pug-walk");
+var path = require("path");
+var dirname = path.dirname;
+var loaderUtils = require("loader-utils");
+var nodeResolve = require("resolve").sync;
+var walk = require("pug-walk");
 
 module.exports = function (source) {
-  const modulePaths = {};
+  this.cacheable && this.cacheable();
+
+  var modulePaths = {};
   modulePaths.pug = require.resolve("pug");
   modulePaths.load = nodeResolve("pug-load", {
-    basedir: path.dirname(modulePaths.pug),
+    basedir: dirname(modulePaths.pug),
   });
   modulePaths.runtime = nodeResolve("pug-runtime", {
-    basedir: path.dirname(modulePaths.pug),
+    basedir: dirname(modulePaths.pug),
   });
 
-  const pug = require(modulePaths.pug);
-  const load = require(modulePaths.load);
+  var pug = require(modulePaths.pug);
+  var load = require(modulePaths.load);
 
-  const req = this.resourcePath;
+  var req = loaderUtils.getRemainingRequest(this).replace(/^!/, "");
 
-  const query = this.query ? this.getOptions() : {};
+  var query = loaderUtils.getOptions(this) || {};
 
-  const plugin = load
+  var loadModule = this.loadModule;
+  var resolve = this.resolve;
+  var loaderContext = this;
+  var callback;
+
+  var fileContents = {};
+  var filePaths = {};
+
+  var missingFileMode = false;
+  function getFileContent(context, request) {
+    request = loaderUtils.urlToRequest(request, query.root);
+    var baseRequest = request;
+    var filePath;
+
+    filePath = filePaths[context + " " + request];
+    if (filePath) return filePath;
+
+    var isSync = true;
+    resolve(context, request, function (err, _request) {
+      if (err) {
+        resolve(context, request, function (err2, _request) {
+          if (err2) return callback(err2);
+
+          request = _request;
+          next();
+        });
+        return;
+      }
+
+      request = _request;
+      next();
+      function next() {
+        loadModule(
+          "-!" + path.join(__dirname, "stringify.loader.js") + "!" + request,
+          function (err, source) {
+            if (err) return callback(err);
+
+            filePaths[context + " " + baseRequest] = request;
+            fileContents[request] = JSON.parse(source);
+
+            if (!isSync) {
+              run();
+            }
+          }
+        );
+      }
+    });
+
+    filePath = filePaths[context + " " + baseRequest];
+    if (filePath) return filePath;
+
+    isSync = false;
+    missingFileMode = true;
+    throw "continue";
+  }
+
+  var plugin = loadModule
     ? {
         postParse: function (ast) {
           return walk(ast, function (node) {
@@ -31,16 +91,28 @@ module.exports = function (source) {
           });
         },
         resolve: function (request, source) {
-          const context = path.dirname(source.split("!").pop());
-          return load.resolve(request, source);
+          if (!callback) {
+            callback = loaderContext.async();
+          }
+
+          if (!callback) {
+            return load.resolve(request, source);
+          }
+
+          var context = dirname(source.split("!").pop());
+          return getFileContent(context, request);
         },
         read: function (path) {
-          return load.read(path);
+          if (!callback) {
+            return load.read(path);
+          }
+
+          return fileContents[path];
         },
         postLoad: function postLoad(ast) {
           return walk(
             ast,
-            function (node) {
+            function (node, replace) {
               if (node.file && node.file.ast) {
                 postLoad(node.file.ast);
               }
@@ -61,7 +133,10 @@ module.exports = function (source) {
                   type: "Code",
                   val:
                     "require(" +
-                    JSON.stringify(node.file.fullPath) +
+                    loaderUtils.stringifyRequest(
+                      loaderContext,
+                      node.file.fullPath
+                    ) +
                     ").call(this, locals)",
                   buffer: true,
                   mustEscape: false,
@@ -76,29 +151,37 @@ module.exports = function (source) {
       }
     : {};
 
-  try {
-    const tmplFunc = pug.compileClient(source, {
-      filename: req,
-      doctype: query.doctype || "html",
-      pretty: query.pretty,
-      self: query.self,
-      compileDebug: this.debug || false,
-      globals: ["require"].concat(query.globals || []),
-      name: "template",
-      inlineRuntimeFunctions: false,
-      filters: query.filters,
-      plugins: [plugin].concat(query.plugins || []),
-    });
-
-    const runtime =
+  run();
+  function run() {
+    try {
+      var tmplFunc = pug.compileClient(source, {
+        filename: req,
+        doctype: query.doctype || "html",
+        pretty: query.pretty,
+        self: query.self,
+        compileDebug: loaderContext.debug || false,
+        globals: ["require"].concat(query.globals || []),
+        name: "template",
+        inlineRuntimeFunctions: false,
+        filters: query.filters,
+        plugins: [plugin].concat(query.plugins || []),
+      });
+    } catch (e) {
+      if (missingFileMode) {
+        // Ignore, it'll continue after async action
+        missingFileMode = false;
+        return;
+      }
+      loaderContext.callback(e);
+      return;
+    }
+    var runtime =
       "var pug = require(" +
-      JSON.stringify("!" + modulePaths.runtime) +
+      loaderUtils.stringifyRequest(loaderContext, "!" + modulePaths.runtime) +
       ");\n\n";
-    this.callback(
+    loaderContext.callback(
       null,
       runtime + tmplFunc.toString() + ";\nmodule.exports = template;"
     );
-  } catch (e) {
-    this.callback(e);
   }
 };
