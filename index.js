@@ -31,6 +31,7 @@ module.exports = function (source) {
   const { loadModule, resolve } = this;
   const loaderContext = this;
   let callback;
+  let finished = false;
 
   const fileContents = {};
   const filePaths = {};
@@ -49,7 +50,11 @@ module.exports = function (source) {
     resolve(context, request, (err, resolvedRequest) => {
       if (err) {
         resolve(context, request, (err2, secondResolvedRequest) => {
-          if (err2) return callback(err2);
+          if (err2) {
+            if (finished) return;
+            finished = true;
+            return (callback || loaderContext.callback)(err2);
+          }
 
           request = secondResolvedRequest;
           next();
@@ -64,7 +69,11 @@ module.exports = function (source) {
         loadModule(
           `-!${join(__dirname, "stringify.loader.js")}!${request}`,
           (err, source) => {
-            if (err) return callback(err);
+            if (err) {
+              if (finished) return;
+              finished = true;
+              return (callback || loaderContext.callback)(err);
+            }
 
             filePaths[`${context} ${baseRequest}`] = request;
             fileContents[request] = JSON.parse(source);
@@ -82,7 +91,7 @@ module.exports = function (source) {
 
     isSync = false;
     missingFileMode = true;
-    throw "continue";
+    throw new Error("continue");
   }
 
   const plugin = loadModule
@@ -154,6 +163,7 @@ module.exports = function (source) {
     : {};
 
   const run = () => {
+    if (finished) return;
     try {
       const tmplFunc = pug.compileClient(source, {
         filename: req,
@@ -173,16 +183,20 @@ module.exports = function (source) {
         "!" + modulePaths.runtime
       )});\n\n`;
 
-      loaderContext.callback(
+      if (finished) return;
+      finished = true;
+      (callback || loaderContext.callback)(
         null,
         `${runtime}${tmplFunc.toString()};\nmodule.exports = template;`
       );
     } catch (e) {
-      if (missingFileMode && e === "continue") {
+      if (missingFileMode && e.message === "continue") {
         missingFileMode = false;
         return;
       }
-      loaderContext.callback(e);
+      if (finished) return;
+      finished = true;
+      (callback || loaderContext.callback)(e);
     }
   };
 
