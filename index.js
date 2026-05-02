@@ -91,7 +91,9 @@ module.exports = function (source) {
 
     isSync = false;
     missingFileMode = true;
-    throw new Error("continue");
+    const err = new Error("continue");
+    err.pugLoaderContinue = true;
+    throw err;
   }
 
   const plugin = loadModule
@@ -190,7 +192,11 @@ module.exports = function (source) {
         `${runtime}${tmplFunc.toString()};\nmodule.exports = template;`
       );
     } catch (e) {
-      if (missingFileMode && e.message === "continue") {
+      const isContinue = e.pugLoaderContinue || 
+                         (e.message && e.message.includes("continue")) || 
+                         e === "continue";
+      
+      if (missingFileMode && isContinue) {
         missingFileMode = false;
         return;
       }
