@@ -1,13 +1,20 @@
-var path = require("path");
-var dirname = path.dirname;
-var loaderUtils = require("loader-utils");
-var nodeResolve = require("resolve").sync;
-var walk = require("pug-walk");
+const path = require("path");
+const { dirname, join } = path;
+const loaderUtils = require("loader-utils");
+const nodeResolve = require("resolve").sync;
+const walk = require("pug-walk");
+const { validate } = require("schema-utils");
+const schema = require("./options-schema.json");
 
 module.exports = function (source) {
-  this.cacheable && this.cacheable();
+  const options = this.getOptions() || {};
 
-  var modulePaths = {};
+  validate(schema, options, {
+    name: "PiruPug Loader",
+    baseDataPath: "options",
+  });
+
+  const modulePaths = {};
   modulePaths.pug = require.resolve("pug");
   modulePaths.load = nodeResolve("pug-load", {
     basedir: dirname(modulePaths.pug),
@@ -16,51 +23,50 @@ module.exports = function (source) {
     basedir: dirname(modulePaths.pug),
   });
 
-  var pug = require(modulePaths.pug);
-  var load = require(modulePaths.load);
+  const pug = require(modulePaths.pug);
+  const load = require(modulePaths.load);
 
-  var req = loaderUtils.getRemainingRequest(this).replace(/^!/, "");
+  const req = this.remainingRequest.replace(/^!/, "");
 
-  var query = loaderUtils.getOptions(this) || {};
+  const { loadModule, resolve } = this;
+  const loaderContext = this;
+  let callback;
 
-  var loadModule = this.loadModule;
-  var resolve = this.resolve;
-  var loaderContext = this;
-  var callback;
+  const fileContents = {};
+  const filePaths = {};
 
-  var fileContents = {};
-  var filePaths = {};
+  let missingFileMode = false;
 
-  var missingFileMode = false;
   function getFileContent(context, request) {
-    request = loaderUtils.urlToRequest(request, query.root);
-    var baseRequest = request;
-    var filePath;
+    const originalRequest = request;
+    request = loaderUtils.urlToRequest(request, options.root);
+    const baseRequest = request;
 
-    filePath = filePaths[context + " " + request];
+    let filePath = filePaths[`${context} ${request}`];
     if (filePath) return filePath;
 
-    var isSync = true;
-    resolve(context, request, function (err, _request) {
+    let isSync = true;
+    resolve(context, request, (err, resolvedRequest) => {
       if (err) {
-        resolve(context, request, function (err2, _request) {
+        resolve(context, request, (err2, secondResolvedRequest) => {
           if (err2) return callback(err2);
 
-          request = _request;
+          request = secondResolvedRequest;
           next();
         });
         return;
       }
 
-      request = _request;
+      request = resolvedRequest;
       next();
+
       function next() {
         loadModule(
-          "-!" + path.join(__dirname, "stringify.loader.js") + "!" + request,
-          function (err, source) {
+          `-!${join(__dirname, "stringify.loader.js")}!${request}`,
+          (err, source) => {
             if (err) return callback(err);
 
-            filePaths[context + " " + baseRequest] = request;
+            filePaths[`${context} ${baseRequest}`] = request;
             fileContents[request] = JSON.parse(source);
 
             if (!isSync) {
@@ -71,7 +77,7 @@ module.exports = function (source) {
       }
     });
 
-    filePath = filePaths[context + " " + baseRequest];
+    filePath = filePaths[`${context} ${baseRequest}`];
     if (filePath) return filePath;
 
     isSync = false;
@@ -79,18 +85,16 @@ module.exports = function (source) {
     throw "continue";
   }
 
-  var plugin = loadModule
+  const plugin = loadModule
     ? {
-        postParse: function (ast) {
-          return walk(ast, function (node) {
-            if (
-              ["Mixin", "MixinBlock", "NamedBlock"].indexOf(node.type) !== -1
-            ) {
+        postParse(ast) {
+          return walk(ast, (node) => {
+            if (["Mixin", "MixinBlock", "NamedBlock"].includes(node.type)) {
               ast._mustBeInlined = true;
             }
           });
         },
-        resolve: function (request, source) {
+        resolve(request, source) {
           if (!callback) {
             callback = loaderContext.async();
           }
@@ -99,22 +103,23 @@ module.exports = function (source) {
             return load.resolve(request, source);
           }
 
-          var context = dirname(source.split("!").pop());
+          const context = dirname(source.split("!").pop());
           return getFileContent(context, request);
         },
-        read: function (path) {
+        read(path) {
           if (!callback) {
             return load.read(path);
           }
 
           return fileContents[path];
         },
-        postLoad: function postLoad(ast) {
+        postLoad(ast) {
+          const self = this;
           return walk(
             ast,
-            function (node, replace) {
+            (node) => {
               if (node.file && node.file.ast) {
-                postLoad(node.file.ast);
+                self.postLoad(node.file.ast);
               }
 
               if (node.type === "Include") {
@@ -123,7 +128,7 @@ module.exports = function (source) {
                 }
               }
             },
-            function (node, replace) {
+            (node, replace) => {
               if (
                 node.type === "Include" &&
                 !(node.block && node.block.nodes.length) &&
@@ -131,13 +136,10 @@ module.exports = function (source) {
               ) {
                 replace({
                   type: "Code",
-                  val:
-                    "require(" +
-                    loaderUtils.stringifyRequest(
-                      loaderContext,
-                      node.file.fullPath
-                    ) +
-                    ").call(this, locals)",
+                  val: `require(${loaderUtils.stringifyRequest(
+                    loaderContext,
+                    node.file.fullPath
+                  )}).call(this, locals)`,
                   buffer: true,
                   mustEscape: false,
                   isInline: false,
@@ -151,37 +153,39 @@ module.exports = function (source) {
       }
     : {};
 
-  run();
-  function run() {
+  const run = () => {
     try {
-      var tmplFunc = pug.compileClient(source, {
+      const tmplFunc = pug.compileClient(source, {
         filename: req,
-        doctype: query.doctype || "html",
-        pretty: query.pretty,
-        self: query.self,
-        compileDebug: loaderContext.debug || false,
-        globals: ["require"].concat(query.globals || []),
+        doctype: options.doctype || "html",
+        pretty: options.pretty,
+        self: options.self,
+        compileDebug: options.compileDebug ?? (this.mode === "development"),
+        globals: ["require", ...(options.globals || [])],
         name: "template",
         inlineRuntimeFunctions: false,
-        filters: query.filters,
-        plugins: [plugin].concat(query.plugins || []),
+        filters: options.filters,
+        plugins: [plugin, ...(options.plugins || [])],
       });
+
+      const runtime = `var pug = require(${loaderUtils.stringifyRequest(
+        loaderContext,
+        "!" + modulePaths.runtime
+      )});\n\n`;
+
+      loaderContext.callback(
+        null,
+        `${runtime}${tmplFunc.toString()};\nmodule.exports = template;`
+      );
     } catch (e) {
-      if (missingFileMode) {
-        // Ignore, it'll continue after async action
+      if (missingFileMode && e === "continue") {
         missingFileMode = false;
         return;
       }
       loaderContext.callback(e);
-      return;
     }
-    var runtime =
-      "var pug = require(" +
-      loaderUtils.stringifyRequest(loaderContext, "!" + modulePaths.runtime) +
-      ");\n\n";
-    loaderContext.callback(
-      null,
-      runtime + tmplFunc.toString() + ";\nmodule.exports = template;"
-    );
-  }
+  };
+
+  run();
 };
+

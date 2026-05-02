@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "properties": {
+    "doctype": {
+      "type": "string"
+    },
+    "pretty": {
+      "type": "boolean"
+    },
+    "self": {
+      "type": "boolean"
+    },
+    "compileDebug": {
+      "type": "boolean"
+    },
+    "globals": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "name": {
+      "type": "string"
+    },
+    "inlineRuntimeFunctions": {
+      "type": "boolean"
+    },
+    "filters": {
+      "type": "object"
+    },
+    "plugins": {
+      "type": "array"
+    },
+    "root": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
