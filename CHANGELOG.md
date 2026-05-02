@@ -1,5 +1,8 @@
 # Change log
 
+## v0.0.18
+- fix: Fix error handling for missing files in async resolution flow.
+
 ## v0.0.14
 - Modernized codebase with ES6+ (const, let, arrow functions).
 - Updated `loader-utils` to latest version.
